@@ -1,5 +1,5 @@
 /**
- * DDNS Pro & Proxy IP Manager v6.9
+ * DDNS Pro & Proxy IP Manager v7.0
  */
 
 // ==================== 默认配置（环境变量未设置时使用） ====================
@@ -185,6 +185,8 @@ export default {
             const html = renderHTML(config);
             console.log(`📄 首页请求处理耗时: ${Date.now() - requestStart}ms`);
             const headers = new Headers({ 'Content-Type': 'text/html;charset=UTF-8' });
+            // 首页不缓存（含动态配置），但允许浏览器在后退时使用缓存
+            headers.set('Cache-Control', 'no-store');
             if (auth.shouldSetCookie) {
                 headers.set('Set-Cookie', buildAuthCookie());
             }
@@ -205,6 +207,10 @@ export default {
             headers.set('X-Processing-Time', `${Date.now() - requestStart}ms`);
             if (url.pathname.startsWith('/api/') && !headers.has('Content-Type')) {
                 headers.set('Content-Type', 'application/json; charset=UTF-8');
+            }
+            // API 响应不缓存，确保数据实时性
+            if (url.pathname.startsWith('/api/')) {
+                headers.set('Cache-Control', 'no-store');
             }
             if (auth.shouldSetCookie) {
                 headers.set('Set-Cookie', buildAuthCookie());
@@ -959,6 +965,9 @@ async function loadFromRemoteUrl(url) {
             hostname.startsWith('10.') ||
             hostname.startsWith('192.168.') ||
             /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) ||
+            hostname.startsWith('169.254.') ||   // 链路本地地址 (AWS/GCP 元数据服务等)
+            hostname.startsWith('100.64.') ||    // 运营商级 NAT (RFC 6598)
+            hostname === 'metadata.google.internal' ||
             hostname === '0.0.0.0' ||
             hostname === '::1' ||
             hostname === '[::1]' ||
@@ -1823,14 +1832,13 @@ function renderHTML(C) {
     const settingsJson = JSON.stringify(GLOBAL_SETTINGS);
     const ipInfoEnabled = C.ipInfoEnabled;
     
-    return `<!DOCTYPE html>
+    const html = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DDNS Pro v6.9 - IP管理面板</title>
+    <title>DDNS Pro v7.0 - IP管理面板</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🌐</text></svg>">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         :root {
             --primary: #007aff;
@@ -1842,11 +1850,102 @@ function renderHTML(C) {
             --text: #1d1d1f;
             --secondary: #86868b;
         }
+        *, *::before, *::after { box-sizing: border-box; }
         body {
             background: var(--bg);
             color: var(--text);
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
+        button, input, select, textarea { font-family: inherit; font-size: inherit; line-height: inherit; margin: 0; }
+        table { border-collapse: collapse; }
+        /* ── Bootstrap replacement: Grid ── */
+        .container { width: 100%; max-width: 1140px; margin: 0 auto; padding: 0 12px; }
+        .row { display: flex; flex-wrap: wrap; margin: 0 -6px; }
+        .row > * { padding: 0 6px; }
+        .row.g-2 { margin: 0 -4px; }
+        .row.g-2 > * { padding: 4px; }
+        .col-6 { flex: 0 0 50%; max-width: 50%; }
+        .col-lg-5, .col-lg-7 { flex: 0 0 100%; max-width: 100%; }
+        @media (min-width: 992px) {
+            .col-lg-5 { flex: 0 0 41.6667%; max-width: 41.6667%; }
+            .col-lg-7 { flex: 0 0 58.3333%; max-width: 58.3333%; }
+        }
+        /* ── Bootstrap replacement: Forms ── */
+        .form-control, .form-select { display: block; width: 100%; font-size: 1rem; line-height: 1.5; color: #212529; background-clip: padding-box; appearance: none; }
+        .form-control-sm { font-size: .875rem; padding: .25rem .5rem; }
+        .form-select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23343a40' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right .75rem center; background-size: 16px 12px; padding-right: 2.25rem; }
+        .form-select-sm { font-size: .875rem; padding: .25rem 2rem .25rem .5rem; }
+        .input-group { display: flex; flex-wrap: wrap; align-items: stretch; width: 100%; }
+        .input-group > .form-control { flex: 1 1 auto; width: 1%; min-width: 0; position: relative; }
+        .input-group > .btn { position: relative; z-index: 2; }
+        .input-group > :not(:first-child) { border-top-left-radius: 0 !important; border-bottom-left-radius: 0 !important; }
+        .input-group > :not(:last-child) { border-top-right-radius: 0 !important; border-bottom-right-radius: 0 !important; }
+        .input-group-sm > .form-control, .input-group-sm > .btn { font-size: .875rem; padding: .25rem .5rem; }
+        textarea.form-control { min-height: calc(1.5em + .75rem + 2px); }
+        /* ── Bootstrap replacement: Buttons ── */
+        .btn { display: inline-block; text-align: center; vertical-align: middle; cursor: pointer; user-select: none; line-height: 1.5; font-size: 1rem; background: transparent; border: 1px solid transparent; color: inherit; text-decoration: none; }
+        .btn-sm { font-size: .875rem; padding: .25rem .5rem; border-radius: .25rem; }
+        .btn-primary { background: var(--primary); color: #fff; border: 1px solid var(--primary); }
+        .btn-success { background: var(--success); color: #fff; border: 1px solid var(--success); }
+        .btn-danger { background: var(--danger); color: #fff; border: 1px solid var(--danger); }
+        .btn-info { background: #0dcaf0; color: #000; border: 1px solid #0dcaf0; }
+        .btn-dark { background: #212529; color: #fff; border: 1px solid #212529; }
+        .btn-outline-primary { background: transparent; color: var(--primary); border: 1px solid var(--primary); }
+        .btn-outline-primary:hover { background: var(--primary); color: #fff; }
+        .btn-outline-secondary { background: transparent; color: #6c757d; border: 1px solid #6c757d; }
+        .btn-outline-secondary:hover { background: #6c757d; color: #fff; }
+        .btn-outline-success { background: transparent; color: var(--success); border: 1px solid var(--success); }
+        .btn-outline-success:hover { background: var(--success); color: #fff; }
+        .btn-outline-danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+        .btn-outline-danger:hover { background: var(--danger); color: #fff; }
+        /* ── Bootstrap replacement: Tables ── */
+        .table { width: 100%; margin-bottom: 1rem; vertical-align: top; border-color: #dee2e6; }
+        .table > :not(caption) > * > * { padding: .5rem; }
+        .table-sm > :not(caption) > * > * { padding: .25rem; }
+        .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        /* ── Bootstrap replacement: Badge / Progress ── */
+        .badge { display: inline-block; padding: .35em .65em; font-size: .75em; font-weight: 700; line-height: 1; text-align: center; white-space: nowrap; vertical-align: baseline; border-radius: .375rem; }
+        .progress { display: flex; height: 1rem; overflow: hidden; font-size: .75rem; background-color: #e9ecef; border-radius: .375rem; }
+        .progress-bar { display: flex; flex-direction: column; justify-content: center; overflow: hidden; color: #fff; text-align: center; white-space: nowrap; transition: width .6s ease; }
+        /* ── Bootstrap replacement: Utilities - Spacing ── */
+        .m-0 { margin: 0 !important; }
+        .mb-0 { margin-bottom: 0 !important; }
+        .mb-1 { margin-bottom: .25rem !important; }
+        .mb-2 { margin-bottom: .5rem !important; }
+        .mb-3 { margin-bottom: 1rem !important; }
+        .mt-2 { margin-top: .5rem !important; }
+        .mt-auto { margin-top: auto !important; }
+        .p-3 { padding: 1rem !important; }
+        .p-4 { padding: 1.5rem !important; }
+        .pb-5 { padding-bottom: 3rem !important; }
+        /* ── Bootstrap replacement: Utilities - Flex ── */
+        .d-flex { display: flex !important; }
+        .flex-wrap { flex-wrap: wrap !important; }
+        .flex-grow-1 { flex-grow: 1 !important; }
+        .flex-shrink-0 { flex-shrink: 0 !important; }
+        .gap-1 { gap: .25rem !important; }
+        .gap-2 { gap: .5rem !important; }
+        .align-items-center { align-items: center !important; }
+        .justify-content-between { justify-content: space-between !important; }
+        /* ── Bootstrap replacement: Utilities - Text ── */
+        .text-white { color: #fff !important; }
+        .text-center { text-align: center !important; }
+        .text-secondary { color: var(--secondary) !important; }
+        .text-danger { color: var(--danger) !important; }
+        .text-dark { color: #212529 !important; }
+        .text-decoration-none { text-decoration: none !important; }
+        .fw-bold { font-weight: 700 !important; }
+        .small, small { font-size: .875em; }
+        /* ── Bootstrap replacement: Utilities - Background ── */
+        .bg-light { background-color: #f8f9fa !important; }
+        .bg-success { background-color: var(--success) !important; }
+        .bg-danger { background-color: var(--danger) !important; }
+        /* ── Bootstrap replacement: Utilities - Size ── */
+        .w-100 { width: 100% !important; }
+        h6 { margin-top: 0; margin-bottom: .5rem; font-size: 1rem; font-weight: 500; }
         .hero {
             padding: 40px 0 20px;
             position: relative;
@@ -2354,7 +2453,7 @@ function renderHTML(C) {
 <div class="container hero">
     <h1>
         🌐 DDNS Pro 多域名管理
-        <span class="version-badge">v6.9</span>
+        <span class="version-badge">v7.0</span>
     </h1>
     <div class="hero-actions">
         <div class="guide-toggle" onclick="toggleGuide()" title="使用步骤提示">?</div>
@@ -2528,6 +2627,7 @@ function renderHTML(C) {
     const SETTINGS = ${settingsJson};
     const IP_INFO_ENABLED = ${ipInfoEnabled};
     const AUTH_ENABLED = ${C.authKey ? 'true' : 'false'};
+    const MODE_LABELS = {'A': 'A记录', 'TXT': 'TXT记录', 'ALL': '双模式'};
     let currentTargetIndex = 0;
     let currentPool = 'pool';
     let abortController = null;
@@ -2752,7 +2852,6 @@ function renderHTML(C) {
         try {
             const r = await apiFetch('/api/load-remote-url', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ url })
             }).then(r => r.json());
             
@@ -2793,7 +2892,6 @@ function renderHTML(C) {
         try {
             const r = await apiFetch('/api/save-pool', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ pool: content, poolKey: currentPool, mode })
             }).then(r => r.json());
             
@@ -2827,7 +2925,6 @@ function renderHTML(C) {
         try {
             const r = await apiFetch('/api/save-pool', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ pool: content, poolKey: currentPool, mode: 'remove' })
             }).then(r => r.json());
             
@@ -3170,14 +3267,12 @@ function renderHTML(C) {
         }
         
         const target = TARGETS[currentTargetIndex];
-        const modeLabel = {'A': 'A记录', 'TXT': 'TXT记录', 'ALL': '双模式'};
-        
-        log(\`➕ 添加到\${modeLabel[target.mode]}: \${ip}\`, 'info');
+
+        log(\`➕ 添加到\${MODE_LABELS[target.mode]}: \${ip}\`, 'info');
         
         try {
             const r = await apiFetch('/api/add-a-record', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ ip, targetIndex: currentTargetIndex })
             }).then(r => r.json());
             
@@ -3286,11 +3381,11 @@ function renderHTML(C) {
     
     async function deleteRecord(id) {
         if (!confirm('确认删除？')) return;
-        
+
         try {
-            await apiFetch(\`/api/delete-record?id=\${id}\`,{
-            method: 'POST'
-        });
+            await apiFetch(\`/api/delete-record?id=\${id}\`, {
+                method: 'POST'
+            });
             log('🗑️  已删除', 'success');
             refreshStatus();
         } catch (e) {
@@ -3300,11 +3395,11 @@ function renderHTML(C) {
 
     async function deleteTxtIP(recordId, ip) {
         if (!confirm(\`确认删除 \${ip}？\`)) return;
-        
+
         try {
-            await apiFetch(\`/api/delete-record?id=\${recordId}&ip=\${encodeURIComponent(ip)}&isTxt=true\`,{
-            method: 'POST'
-        });
+            await apiFetch(\`/api/delete-record?id=\${recordId}&ip=\${encodeURIComponent(ip)}&isTxt=true\`, {
+                method: 'POST'
+            });
             log('🗑️ 已从TXT记录删除', 'success');
             refreshStatus();
         } catch (e) {
@@ -3450,7 +3545,6 @@ function renderHTML(C) {
         try {
             const r = await apiFetch('/api/create-pool', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ poolKey })
             }).then(r => r.json());
             
@@ -3471,17 +3565,21 @@ function renderHTML(C) {
     async function deleteCurrentPool() {
         const protectedPools = ['pool', 'pool_trash', 'domain_pool_mapping'];
         if (protectedPools.includes(currentPool)) {
-            const names = { pool: '通用池', pool_trash: '垃圾桶', domain_pool_mapping: '系统数据' };
-            alert(\`不能删除\${names[currentPool]}!\`);
+            alert(\`不能删除\${getPoolName(currentPool)}!\`);
             return;
         }
         
         if (!confirm(\`确认删除 \${currentPool}?\`)) return;
         
         try {
-            await apiFetch(\`/api/delete-pool?poolKey=\${currentPool}\`,{
-            method: 'POST'
-        });
+            const r = await apiFetch(\`/api/delete-pool?poolKey=\${currentPool}\`, {
+                method: 'POST'
+            }).then(r => r.json());
+            
+            if (!r.success) {
+                log(\`❌ 删除失败: \${r.error || '未知错误'}\`, 'error');
+                return;
+            }
             
             availablePools = availablePools.filter(p => p !== currentPool);
             currentPool = 'pool';
@@ -3515,7 +3613,6 @@ function renderHTML(C) {
         try {
             await apiFetch('/api/save-domain-pool-mapping', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ mapping: domainPoolMapping })
             });
             
@@ -3621,7 +3718,6 @@ function renderHTML(C) {
             if (validCount > 0) {
                 const r = await apiFetch('/api/save-pool', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ pool: validLines.join('\\n'), poolKey: cleaningPool, mode: 'replace' })
                 }).then(r => r.json());
                 
@@ -3636,7 +3732,6 @@ function renderHTML(C) {
                 // 清空池
                 await apiFetch('/api/save-pool', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ pool: '', poolKey: cleaningPool, mode: 'replace' })
                 });
                 log(\`⚠️ 洗库完成，无有效IP，池已清空\`, 'warn');
@@ -3653,7 +3748,6 @@ function renderHTML(C) {
                 
                 await apiFetch('/api/save-pool', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ pool: trashContent, poolKey: 'pool_trash', mode: 'append' })
                 });
                 
@@ -3694,7 +3788,6 @@ function renderHTML(C) {
             // 调用恢复API
             const r = await apiFetch('/api/restore-from-trash', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ ips: ipsToRestore, restoreToSource: true })
             }).then(r => r.json());
             
@@ -3728,7 +3821,6 @@ function renderHTML(C) {
         try {
             const r = await apiFetch('/api/restore-from-trash', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ ips, restoreToSource: true })
             }).then(r => r.json());
             
@@ -3841,10 +3933,16 @@ function renderHTML(C) {
             log('🌍 IP归属地查询: 已启用', 'info');
         }
         switchDomain();
-        showPoolInfo();
-        loadDomainPoolMapping();
+        Promise.all([
+            showPoolInfo(),
+            loadDomainPoolMapping()
+        ]).catch(e => log('⚠️ 初始化部分失败', 'error'));
     });
 </script>
 </body>
 </html>`;
+    // 压缩HTML空白，减少传输体积约20-30%
+    return html
+        .replace(/^[ \t]+/gm, '')
+        .replace(/\n{2,}/g, '\n');
 }
